@@ -4,7 +4,12 @@ import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
+from sklearn.metrics import (
+    accuracy_score,
+    classification_report,
+    confusion_matrix,
+    roc_auc_score,
+)
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
@@ -78,20 +83,40 @@ def train_model(X, y, preprocessor):
     model = Pipeline(
         steps=[
             ("preprocessor", preprocessor),
-            ("classifier", LogisticRegression(max_iter=200, random_state=42)),
+            (
+                "classifier",
+                LogisticRegression(
+                    max_iter=300,
+                    random_state=42,
+                    class_weight="balanced",
+                ),
+            ),
         ]
     )
 
-    print("Step 4: Training Logistic Regression model...")
+    print("Step 4: Training balanced Logistic Regression model...")
     model.fit(X_train, y_train)
     print("Model training complete.")
 
     print("Step 5: Making predictions...")
     y_pred = model.predict(X_test)
+    y_prob = model.predict_proba(X_test)[:, 1]
 
-    print("\nAccuracy:", accuracy_score(y_test, y_pred))
-    print("\nConfusion Matrix:\n", confusion_matrix(y_test, y_pred))
+    accuracy = accuracy_score(y_test, y_pred)
+    roc_auc = roc_auc_score(y_test, y_prob)
+    cm = confusion_matrix(y_test, y_pred)
+
+    print("\nAccuracy:", accuracy)
+    print("ROC-AUC:", roc_auc)
+    print("\nConfusion Matrix:\n", cm)
     print("\nClassification Report:\n", classification_report(y_test, y_pred))
+
+    tn, fp, fn, tp = cm.ravel()
+    print("\nDetailed Confusion Matrix Values:")
+    print("True Negatives :", tn)
+    print("False Positives:", fp)
+    print("False Negatives:", fn)
+    print("True Positives :", tp)
 
     return model
 
