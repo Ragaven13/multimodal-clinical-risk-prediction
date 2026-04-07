@@ -39,9 +39,9 @@ def prepare_data(df: pd.DataFrame):
     df = df.copy()
 
     y = df["icu_admission"].astype(int)
-    X = df[["anchor_age", "gender", "race", "hospital_expire_flag"]]
+    X = df[["anchor_age", "gender", "race"]]
 
-    numeric_features = ["anchor_age", "hospital_expire_flag"]
+    numeric_features = ["anchor_age"]
     categorical_features = ["gender", "race"]
 
     numeric_transformer = Pipeline(
