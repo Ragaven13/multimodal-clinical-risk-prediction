@@ -1,6 +1,7 @@
 from pathlib import Path
-
+import joblib
 import pandas as pd
+
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import (
@@ -176,7 +177,7 @@ def train_model(X, y, preprocessor):
 
     print(f"\nSaved threshold results to: {results_path}")
 
-    # Final evaluation using calibrated threshold from model calibration
+    # Final evaluation using calibrated threshold from calibration step
     threshold = 0.35
 
     y_pred_best = (y_prob >= threshold).astype(int)
@@ -185,6 +186,14 @@ def train_model(X, y, preprocessor):
     print(f"\nFinal evaluation using calibrated threshold = {threshold}")
     print("\nConfusion Matrix:\n", cm)
     print("\nClassification Report:\n", classification_report(y_test, y_pred_best))
+
+    model_dir = Path("artifacts")
+    model_dir.mkdir(parents=True, exist_ok=True)
+
+    model_path = model_dir / "xgboost_pipeline.joblib"
+    joblib.dump(model, model_path)
+
+    print(f"\nSaved trained model to: {model_path}")
 
     return model, results_df
 
