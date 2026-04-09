@@ -1,17 +1,24 @@
 from pathlib import Path
-from tokenize import group
+
 import pandas as pd
-from sklearn.metrics import accuracy_score, recall_score
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.compose import ColumnTransformer
+from sklearn.metrics import (
+    accuracy_score,
+    confusion_matrix,
+    precision_score,
+    recall_score,
+)
+from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from xgboost import XGBClassifier
+
 
 def load_dataset():
     file_path = Path("data/processed/final_dataset.csv")
-    df = pd.read_csv(file_path)
-    return df
+    if not file_path.exists():
+        raise FileNotFoundError(f"Dataset not found: {file_path}")
+    return pd.read_csv(file_path)
 
 
 def train_model(df):
@@ -21,29 +28,43 @@ def train_model(df):
     numeric_features = ["anchor_age"]
     categorical_features = ["gender", "race"]
 
-    preprocessor = ColumnTransformer([
-        ("num", StandardScaler(), numeric_features),
-        ("cat", OneHotEncoder(handle_unknown="ignore"), categorical_features)
-    ])
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ("num", StandardScaler(), numeric_features),
+            ("cat", OneHotEncoder(handle_unknown="ignore"), categorical_features),
+        ]
+    )
 
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, stratify=y, random_state=42
+        X,
+        y,
+        test_size=0.2,
+        stratify=y,
+        random_state=42,
     )
 
     scale_pos_weight = (y_train == 0).sum() / (y_train == 1).sum()
 
-    model = Pipeline([
-        ("preprocessor", preprocessor),
-        ("classifier", XGBClassifier(
-            n_estimators=100,
-            max_depth=5,
-            learning_rate=0.1,
-            scale_pos_weight=scale_pos_weight,
-            eval_metric="logloss",
-            random_state=42,
-            n_jobs=-1
-        ))
-    ])
+    model = Pipeline(
+        steps=[
+            ("preprocessor", preprocessor),
+            (
+                "classifier",
+                XGBClassifier(
+                    n_estimators=100,
+                    max_depth=5,
+                    learning_rate=0.1,
+                    subsample=0.8,
+                    colsample_bytree=0.8,
+                    objective="binary:logistic",
+                    eval_metric="logloss",
+                    random_state=42,
+                    scale_pos_weight=scale_pos_weight,
+                    n_jobs=-1,
+                ),
+            ),
+        ]
+    )
 
     model.fit(X_train, y_train)
 
@@ -51,60 +72,97 @@ def train_model(df):
     threshold = 0.3
     y_pred = (y_prob >= threshold).astype(int)
 
-    return X_test, y_test, y_pred
+    results_df = X_test.copy()
+    results_df["y_true"] = y_test.values
+    results_df["y_pred"] = y_pred
+
+    return results_df
 
 
-def fairness_by_group(X_test, y_test, y_pred, group_col):
-    print(f"\n Fairness analysis by  {group_col}: \n")
+def safe_confusion_matrix(y_true, y_pred):
+    """
+    Always return tn, fp, fn, tp for binary labels 0/1.
+    """
+    cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
+    tn, fp, fn, tp = cm.ravel()
+    return tn, fp, fn, tp
 
 
-    df = X_test.copy()
-    df["y_true"] = y_test
-    df["y_pred"] = y_pred
+def fairness_by_group(results_df, group_col):
+    print(f"\nFairness analysis by {group_col}:\n")
 
-    groups = df[group_col].unique()
+    groups = sorted(results_df[group_col].dropna().unique())
+    rows = []
 
-    results = []
+    for group in groups:
+        subset = results_df[results_df[group_col] == group].copy()
 
+        if len(subset) == 0:
+            continue
 
-    for g in groups:
-        subset = df[df[group_col] == g]
+        y_true = subset["y_true"]
+        y_pred = subset["y_pred"]
 
-        acc = accuracy_score(subset["y_true"],subset["y_pred"])
-        rec = accuracy_score(subset["y_true"], subset["y_pred"])
+        tn, fp, fn, tp = safe_confusion_matrix(y_true, y_pred)
 
+        accuracy = accuracy_score(y_true, y_pred)
+        precision = precision_score(y_true, y_pred, zero_division=0)
+        recall = recall_score(y_true, y_pred, zero_division=0)
 
-        results.append({
-            "group" : g,
+        actual_positive = int((y_true == 1).sum())
+        predicted_positive = int((y_pred == 1).sum())
+
+        row = {
+            "group": group,
             "size": len(subset),
-            "accuracy":acc,
-            "recall":rec
-        })
+            "actual_positive": actual_positive,
+            "predicted_positive": predicted_positive,
+            "accuracy": accuracy,
+            "precision": precision,
+            "recall": recall,
+            "tn": tn,
+            "fp": fp,
+            "fn": fn,
+            "tp": tp,
+        }
+        rows.append(row)
 
-        print(f"{group_col} = {g}")
-        print(f" Size: {len(subset)}")
-        print(f" Accuracy: {acc:.4f}")
-        print(f" Recall : {rec:.4f}")
-        print("_"*30)
+        print(f"{group_col} = {group}")
+        print(f"  Size               : {len(subset)}")
+        print(f"  Actual ICU cases   : {actual_positive}")
+        print(f"  Predicted ICU cases: {predicted_positive}")
+        print(f"  Accuracy           : {accuracy:.4f}")
+        print(f"  Precision          : {precision:.4f}")
+        print(f"  Recall             : {recall:.4f}")
+        print(f"  TN                 : {tn}")
+        print(f"  FP                 : {fp}")
+        print(f"  FN                 : {fn}")
+        print(f"  TP                 : {tp}")
+        print("-" * 40)
 
-    return pd.DataFrame(results)
+    return pd.DataFrame(rows)
+
 
 def main():
-    print("Running fairness audit...")
+    print("Running corrected fairness audit...")
 
     df = load_dataset()
-    X_test, y_test, y_pred = train_model(df)
+    results_df = train_model(df)
 
-    race_results = fairness_by_group(X_test, y_test, y_pred, "race")
-    gender_results = fairness_by_group(X_test, y_test, y_pred, "gender")
+    race_results = fairness_by_group(results_df, "race")
+    gender_results = fairness_by_group(results_df, "gender")
 
     output_dir = Path("data/processed")
-    output_dir.mkdir(exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    race_results.to_csv(output_dir / "fairness_race.csv", index=False)
-    gender_results.to_csv(output_dir / "fairness_gender.csv", index=False)
+    race_path = output_dir / "fairness_race.csv"
+    gender_path = output_dir / "fairness_gender.csv"
 
-    print("\nSaved fairness results to data/processed/")
+    race_results.to_csv(race_path, index=False)
+    gender_results.to_csv(gender_path, index=False)
+
+    print(f"\nSaved race fairness results to: {race_path}")
+    print(f"Saved gender fairness results to: {gender_path}")
 
 
 if __name__ == "__main__":

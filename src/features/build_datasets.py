@@ -30,7 +30,7 @@ def build_dataset(admissions, patients, icu):
         "anchor_age",
         "gender",
         "race",
-        "hospital_expire_flag",
+        
         "icu_admission"
     ]]
 
