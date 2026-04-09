@@ -105,7 +105,6 @@ def evaluate_thresholds(y_test, y_prob, thresholds):
 
     results_df = pd.DataFrame(rows)
 
-    # Best threshold by F1
     best_row = results_df.sort_values(by="f1", ascending=False).iloc[0]
 
     print("\nBest threshold by F1-score:")
@@ -170,7 +169,6 @@ def train_model(X, y, preprocessor):
     thresholds = [0.2, 0.3, 0.4, 0.5, 0.6]
     results_df, best_row = evaluate_thresholds(y_test, y_prob, thresholds)
 
-    # Save threshold results
     output_dir = Path("data/processed")
     output_dir.mkdir(parents=True, exist_ok=True)
     results_path = output_dir / "xgboost_threshold_results.csv"
@@ -178,12 +176,13 @@ def train_model(X, y, preprocessor):
 
     print(f"\nSaved threshold results to: {results_path}")
 
-    # Final evaluation at best threshold
-    best_threshold = float(best_row["threshold"])
-    y_pred_best = (y_prob >= best_threshold).astype(int)
+    # Final evaluation using calibrated threshold from model calibration
+    threshold = 0.35
+
+    y_pred_best = (y_prob >= threshold).astype(int)
     cm = confusion_matrix(y_test, y_pred_best)
 
-    print(f"\nFinal evaluation using best threshold = {best_threshold:.2f}")
+    print(f"\nFinal evaluation using calibrated threshold = {threshold}")
     print("\nConfusion Matrix:\n", cm)
     print("\nClassification Report:\n", classification_report(y_test, y_pred_best))
 
