@@ -3,6 +3,9 @@ from pathlib import Path
 import joblib
 import pandas as pd
 import streamlit as st
+import shap
+
+# CONFIG
 
 st.set_page_config(page_title="Clinical Risk Dashboard", layout="wide")
 
@@ -15,6 +18,8 @@ MODEL_PATH = Path("artifacts/xgboost_pipeline.joblib")
 THRESHOLD = 0.35
 
 
+# LOAD MODEL
+
 @st.cache_resource
 def load_model():
     if not MODEL_PATH.exists():
@@ -25,10 +30,15 @@ def load_model():
 
 model = load_model()
 
+
+# SIDEBAR INPUT
+
 st.sidebar.header("Patient Input")
 
 age = st.sidebar.slider("Age", min_value=18, max_value=100, value=50)
+
 gender = st.sidebar.selectbox("Gender", ["F", "M"])
+
 race = st.sidebar.selectbox(
     "Race",
     [
@@ -41,6 +51,8 @@ race = st.sidebar.selectbox(
     ],
 )
 
+# INPUT DATAFRAME
+
 input_df = pd.DataFrame(
     [
         {
@@ -51,14 +63,26 @@ input_df = pd.DataFrame(
     ]
 )
 
+
+# DISPLAY INPUT
+
 st.markdown("## Patient Summary")
 st.write(input_df)
 
+
+# PREDICTION
+
 if st.button("Predict ICU Risk"):
+
+    # Predict probability
     risk_prob = model.predict_proba(input_df)[0, 1]
+
+    # Apply threshold
     prediction = "High ICU Risk" if risk_prob >= THRESHOLD else "Lower ICU Risk"
 
+    # Display result
     st.markdown("## Prediction")
+
     st.metric("ICU Risk Probability", f"{risk_prob:.3f}")
     st.write(f"**Threshold used:** {THRESHOLD}")
     st.write(f"**Prediction:** {prediction}")
@@ -67,3 +91,38 @@ if st.button("Predict ICU Risk"):
         st.warning("Patient flagged as high ICU risk.")
     else:
         st.success("Patient flagged as lower ICU risk.")
+
+    
+    # SHAP EXPLANATION
+    
+    st.markdown("## Model Explanation (SHAP)")
+
+try:
+    xgb_model = model.named_steps["classifier"]
+    preprocessor = model.named_steps["preprocessor"]
+
+    X_transformed = preprocessor.transform(input_df)
+
+    explainer = shap.TreeExplainer(xgb_model)
+    shap_values = explainer.shap_values(X_transformed)
+
+    feature_names = preprocessor.get_feature_names_out()
+
+    shap_df = pd.DataFrame({
+        "feature": feature_names,
+        "importance": shap_values[0]
+    })
+
+    shap_df["abs_importance"] = shap_df["importance"].abs()
+    shap_df = shap_df.sort_values(by="abs_importance", ascending=False)
+
+    top_features = shap_df.head(5)
+
+    st.write("Top contributing factors:")
+    st.dataframe(top_features[["feature", "importance"]])
+
+    #  BAR CHART 
+    st.bar_chart(top_features.set_index("feature")["importance"])
+
+except Exception as e:
+    st.error(f"SHAP explanation failed: {e}")
